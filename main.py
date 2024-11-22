@@ -5,13 +5,28 @@ import logging
 from typing import Optional
 from pydantic import BaseModel
 from conversation_handler import store_user_message, store_bot_response, extract_conversation_history, get_completion
+from dotenv import load_dotenv
+import os
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
 logger = logging.getLogger(__name__)
 
+# Load environment variables
+load_dotenv()
+
 # Configuration
-TELEGRAM_BOT_TOKEN = '7516762763:AAHWYgVMX7ZrWkH5HpWvPEAhogdKMdEQAWY'
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+if not TELEGRAM_BOT_TOKEN:
+    logger.error("TELEGRAM_BOT_TOKEN not found in environment variables")
+    raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
+
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 class TelegramMessage(BaseModel):
@@ -26,28 +41,36 @@ app = FastAPI()
 
 async def send_message(chat_id: int, text: str):
     """Asynchronously send message to Telegram"""
+    logger.info(f"Sending message to chat_id {chat_id}")
     async with httpx.AsyncClient() as client:
         payload = {"chat_id": chat_id, "text": text}
         try:
+            logger.debug(f"Making Telegram API request to /sendMessage for chat_id {chat_id}")
             response = await client.post(
                 f"{TELEGRAM_API_URL}/sendMessage", 
                 json=payload,
                 timeout=10.0
             )
             response.raise_for_status()
+            logger.info(f"Successfully sent message to chat_id {chat_id}")
         except Exception as e:
-            logger.error(f"Failed to send message to chat_id {chat_id}: {str(e)}")
+            logger.error(f"Failed to send message to chat_id {chat_id}: {str(e)}", exc_info=True)
 
 async def process_message(text: str, chat_id: int) -> str:
     """Process incoming messages and return appropriate responses"""
+    logger.info(f"Processing message from chat_id {chat_id}: {text[:50]}...")
+    
     # Store user message first
     await store_user_message(chat_id, text)
     
     if text == "/start":
         response = "Welcome! How can I assist you today?"
+        logger.info(f"Sending welcome message to chat_id {chat_id}")
     elif text == "/reset":
         response = "Resetting your session."
+        logger.info(f"Resetting session for chat_id {chat_id}")
     elif text == "/history":
+        logger.info(f"Retrieving history for chat_id {chat_id}")
         history = await extract_conversation_history(chat_id)
         response = "\n".join([msg["content"] for msg in history])
     else:
