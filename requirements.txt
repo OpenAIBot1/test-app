@@ -3,4 +3,4 @@ hypercorn>=0.14.4
 requests>=2.28.0
 python-dotenv>=1.0.0
 httpx>=0.24.1
-ell>=0.0.14
+ell-ai>=0.0.14
