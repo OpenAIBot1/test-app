@@ -4,7 +4,7 @@ import asyncio
 import logging
 from typing import Optional
 from pydantic import BaseModel
-from conversation_handler import store_user_message, store_bot_response, extract_conversation_history, say_hello_to_user, message_history
+from conversation_handler import store_user_message, store_bot_response, extract_conversation_history, get_completion
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,18 +40,22 @@ async def send_message(chat_id: int, text: str):
 
 async def process_message(text: str, chat_id: int) -> str:
     """Process incoming messages and return appropriate responses"""
+    # Store user message first
+    await store_user_message(chat_id, text)
+    
     if text == "/start":
-        return "Welcome! How can I assist you today?"
+        response = "Welcome! How can I assist you today?"
     elif text == "/reset":
-        return "Resetting your session."
+        response = "Resetting your session."
     elif text == "/history":
-        return await extract_conversation_history(chat_id)
+        history = await extract_conversation_history(chat_id)
+        response = "\n".join([msg["content"] for msg in history])
     else:
-        resp = say_hello_to_user(message_history)
-        if resp.tool_calls:
-            tool_results = resp.call_tools_and_collect_as_message()
-            return f"{tool_results.text_only}"
-        return f"{resp.text}"
+        response = await get_completion(chat_id)
+    
+    # Store bot response
+    await store_bot_response(chat_id, response)
+    return response
 
 async def poll_telegram():
     """Poll Telegram for updates using proper async patterns"""
@@ -83,15 +87,11 @@ async def poll_telegram():
 
                             logger.info(f"Received message from chat_id {chat_id}: {text}")
 
-                            # Store user message
-                            await store_user_message(chat_id, text)
-
                             # Process message and get response
                             bot_response = await process_message(text, chat_id)
 
-                            # Send and store response
+                            # Send response
                             await send_message(chat_id, bot_response)
-                            await store_bot_response(chat_id, bot_response)
 
                     except Exception as e:
                         logger.error(f"Error processing update: {str(e)}")
