@@ -57,17 +57,24 @@ async def process_message(text: str, chat_id: int) -> str:
     await store_bot_response(chat_id, response)
     return response
 
+# Global variable to store the polling task
+polling_task = None
+
 async def poll_telegram():
     """Poll Telegram for updates using proper async patterns"""
     offset = 0
-    async with httpx.AsyncClient() as client:
-        while True:
-            try:
+    while True:
+        try:
+            async with httpx.AsyncClient() as client:
                 response = await client.get(
                     f"{TELEGRAM_API_URL}/getUpdates",
                     params={"offset": offset, "timeout": 30},
                     timeout=35.0
                 )
+                
+                if response.status_code == 409:
+                    logger.warning("Conflict: Another instance is running. Shutting down this polling instance.")
+                    return
                 
                 if response.status_code != 200:
                     logger.error(f"Failed to get updates: {response.text}")
@@ -97,30 +104,33 @@ async def poll_telegram():
                         logger.error(f"Error processing update: {str(e)}")
                         continue
 
-            except httpx.TimeoutException:
-                continue
-            except Exception as e:
-                logger.error(f"Polling error: {str(e)}")
-                await asyncio.sleep(5)
+        except httpx.TimeoutException:
+            continue
+        except asyncio.CancelledError:
+            logger.info("Polling task was cancelled")
+            return
+        except Exception as e:
+            logger.error(f"Polling error: {str(e)}")
+            await asyncio.sleep(5)
 
+@app.on_event("startup")
 async def startup_event():
     """Start the polling task"""
-    app.state.polling_task = asyncio.create_task(poll_telegram())
+    global polling_task
+    polling_task = asyncio.create_task(poll_telegram())
     logger.info("Started Telegram polling task")
 
+@app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup polling task"""
-    if hasattr(app.state, 'polling_task'):
-        app.state.polling_task.cancel()
+    global polling_task
+    if polling_task:
+        polling_task.cancel()
         try:
-            await app.state.polling_task
+            await polling_task
         except asyncio.CancelledError:
             pass
         logger.info("Stopped Telegram polling task")
-
-# Register startup and shutdown events
-app.add_event_handler("startup", startup_event)
-app.add_event_handler("shutdown", shutdown_event)
 
 @app.get("/")
 async def root():
@@ -130,7 +140,7 @@ async def root():
 @app.get("/status")
 async def status():
     """Check if polling is active"""
-    is_polling = hasattr(app.state, 'polling_task') and not app.state.polling_task.done()
+    is_polling = polling_task and not polling_task.done()
     return {
         "polling_active": is_polling,
         "bot_token_configured": bool(TELEGRAM_BOT_TOKEN)
