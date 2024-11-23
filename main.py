@@ -28,6 +28,7 @@ if not TELEGRAM_BOT_TOKEN:
     raise ValueError("TELEGRAM_BOT_TOKEN environment variable is required")
 
 TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
+WEBHOOK_URL = "https://web-production-1d22.up.railway.app"  # Your Railway app URL
 
 class TelegramMessage(BaseModel):
     chat: dict
@@ -80,91 +81,51 @@ async def process_message(text: str, chat_id: int) -> str:
     await store_bot_response(chat_id, response)
     return response
 
-# Global variable to store the polling task
-polling_task = None
-
-async def poll_telegram():
-    """Poll Telegram for updates using proper async patterns"""
-    offset = 0
-    while True:
-        try:
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{TELEGRAM_API_URL}/getUpdates",
-                    params={"offset": offset, "timeout": 30},
-                    timeout=35.0
-                )
-                
-                if response.status_code == 409:
-                    logger.warning("Conflict: Another instance is running. Shutting down this polling instance.")
-                    return
-                
-                if response.status_code != 200:
-                    logger.error(f"Failed to get updates: {response.text}")
-                    await asyncio.sleep(5)
-                    continue
-
-                updates = response.json().get("result", [])
-                
-                for update in updates:
-                    try:
-                        update_obj = TelegramUpdate(**update)
-                        offset = update_obj.update_id + 1
-
-                        if update_obj.message and update_obj.message.text:
-                            chat_id = update_obj.message.chat.get("id")
-                            text = update_obj.message.text
-
-                            logger.info(f"Received message from chat_id {chat_id}: {text}")
-
-                            # Process message and get response
-                            bot_response = await process_message(text, chat_id)
-
-                            # Send response
-                            await send_message(chat_id, bot_response)
-
-                    except Exception as e:
-                        logger.error(f"Error processing update: {str(e)}")
-                        continue
-
-        except httpx.TimeoutException:
-            continue
-        except asyncio.CancelledError:
-            logger.info("Polling task was cancelled")
-            return
-        except Exception as e:
-            logger.error(f"Polling error: {str(e)}")
-            await asyncio.sleep(5)
+@app.post("/webhook")
+async def webhook(update: TelegramUpdate):
+    if update.message and update.message.text:
+        chat_id = update.message.chat.id
+        await process_message(update.message.text, chat_id)
+    return {"ok": True}
 
 @app.on_event("startup")
-async def startup_event():
-    """Start the polling task"""
-    global polling_task
-    polling_task = asyncio.create_task(poll_telegram())
-    logger.info("Started Telegram polling task")
+async def setup_webhook():
+    async with httpx.AsyncClient() as client:
+        webhook_info_url = f"{TELEGRAM_API_URL}/getWebhookInfo"
+        webhook_info = await client.get(webhook_info_url)
+        
+        if webhook_info.json()["result"]["url"] != f"{WEBHOOK_URL}/webhook":
+            # Delete any existing webhook
+            await client.get(f"{TELEGRAM_API_URL}/deleteWebhook")
+            
+            # Set the webhook
+            webhook_url = f"{TELEGRAM_API_URL}/setWebhook"
+            params = {
+                "url": f"{WEBHOOK_URL}/webhook",
+                "allowed_updates": ["message"]
+            }
+            response = await client.post(webhook_url, params=params)
+            if response.status_code == 200:
+                logger.info("Webhook set successfully")
+            else:
+                logger.error(f"Failed to set webhook: {response.text}")
 
 @app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup polling task"""
-    global polling_task
-    if polling_task:
-        polling_task.cancel()
-        try:
-            await polling_task
-        except asyncio.CancelledError:
-            pass
-        logger.info("Stopped Telegram polling task")
+async def remove_webhook():
+    async with httpx.AsyncClient() as client:
+        # Delete the webhook when shutting down
+        await client.get(f"{TELEGRAM_API_URL}/deleteWebhook")
+        logger.info("Webhook removed")
 
 @app.get("/")
 async def root():
     """Health check endpoint"""
-    return {"status": "running", "mode": "polling"}
+    return {"status": "running", "mode": "webhook"}
 
 @app.get("/status")
 async def status():
-    """Check if polling is active"""
-    is_polling = polling_task and not polling_task.done()
+    """Check if webhook is active"""
     return {
-        "polling_active": is_polling,
+        "webhook_active": True,
         "bot_token_configured": bool(TELEGRAM_BOT_TOKEN)
     }
