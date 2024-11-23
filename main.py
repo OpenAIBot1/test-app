@@ -2,6 +2,7 @@ from fastapi import FastAPI
 import httpx
 import asyncio
 import logging
+import sys
 from typing import Optional
 from pydantic import BaseModel
 from conversation_handler import store_user_message, store_bot_response, extract_conversation_history, get_completion
@@ -11,11 +12,22 @@ import os
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S',
     handlers=[
-        logging.StreamHandler()
+        logging.StreamHandler(stream=sys.stdout)
     ]
 )
+
+# Redirect warnings and below to stdout
+logging.getLogger().handlers[0].setStream(sys.stdout)
+
+# Create a separate handler for errors to stderr
+error_handler = logging.StreamHandler(stream=sys.stderr)
+error_handler.setLevel(logging.ERROR)
+error_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s', '%Y-%m-%d %H:%M:%S'))
+logging.getLogger().addHandler(error_handler)
+
 logger = logging.getLogger(__name__)
 
 # Load environment variables
