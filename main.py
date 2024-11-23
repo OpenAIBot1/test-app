@@ -31,8 +31,10 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 WEBHOOK_URL = "https://web-production-1d22.up.railway.app"  # Your Railway app URL
 
 class TelegramMessage(BaseModel):
+    message_id: int
     chat: dict
     text: Optional[str] = None
+    date: int
 
 class TelegramUpdate(BaseModel):
     update_id: int
@@ -84,7 +86,7 @@ async def process_message(text: str, chat_id: int) -> str:
 @app.post("/webhook")
 async def webhook(update: TelegramUpdate):
     if update.message and update.message.text:
-        chat_id = update.message.chat.id
+        chat_id = update.message.chat["id"]  # Access chat ID from the dictionary
         await process_message(update.message.text, chat_id)
     return {"ok": True}
 
