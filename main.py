@@ -86,8 +86,9 @@ async def process_message(text: str, chat_id: int) -> str:
 @app.post("/webhook")
 async def webhook(update: TelegramUpdate):
     if update.message and update.message.text:
-        chat_id = update.message.chat["id"]  # Access chat ID from the dictionary
-        await process_message(update.message.text, chat_id)
+        chat_id = update.message.chat["id"]
+        response = await process_message(update.message.text, chat_id)
+        await send_message(chat_id, response)
     return {"ok": True}
 
 @app.on_event("startup")
