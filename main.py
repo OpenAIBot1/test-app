@@ -97,10 +97,15 @@ async def process_message(text: str, chat_id: int) -> str:
 
 @app.post("/webhook")
 async def webhook(update: TelegramUpdate):
+    logger.info(f"Received webhook update: {update}")
     if update.message and update.message.text:
         chat_id = update.message.chat["id"]
+        logger.info(f"Processing message: {update.message.text} from chat_id: {chat_id}")
         response = await process_message(update.message.text, chat_id)
+        logger.info(f"Sending response: {response}")
         await send_message(chat_id, response)
+    else:
+        logger.warning(f"Received update without message or text: {update}")
     return {"ok": True}
 
 @app.on_event("startup")
